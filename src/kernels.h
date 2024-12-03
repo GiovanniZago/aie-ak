@@ -2,6 +2,9 @@
 #define FUNCTION_KERNELS_H
 
 #define __X86DEBUG__
+#define __X86DEBUGDISTBEAM__
+// #define __X86DEBUGDIST__
+#define __X86DEBUGRECOMB__
 
 #include "aie_api/aie.hpp"
 #include "aie_api/aie_adf.hpp"
@@ -10,6 +13,7 @@
 #define EV_SIZE 64
 #define V_SIZE 32
 #define P_BUNCHES 2
+#define N_EPOCH 2
 
 static const int16 PI = 720;
 static const int16 MPI = -720;
