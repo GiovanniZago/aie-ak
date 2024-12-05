@@ -24,7 +24,11 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
     int16 idx_i0 = -1, idx_j0 = -1;
     int16 idx_i1 = -1, idx_j1 = -1;
     int16 idx_i_beam = -1, idx_j_beam = -1;
-    aie::mask<V_SIZE> is_jet[P_BUNCHES];
+    aie::vector<int16, N_JETS> pts_jets = aie::zeros<int16, N_JETS>();
+    aie::vector<int16, N_JETS> etas_jets = aie::zeros<int16, N_JETS>();
+    aie::vector<int16, N_JETS> phis_jets = aie::zeros<int16, N_JETS>();
+    aie::mask<N_JETS> jets_mask;
+    jets_mask.set(0);
 
     // read input data
     pts[0] = readincr_v<V_SIZE>(in);
@@ -40,6 +44,15 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
         #if defined(__X86SIM__) && defined(__X86DEBUG__)
         printf("*************************************************************************************************\n");
         printf("Iteration # %d\n\n", i_ep);
+        #endif
+
+        #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGDATA__)
+        aie::print(pts[0], true, "pts[0]: ");
+        aie::print(pts[1], true, "pts[1]: ");
+        aie::print(etas[0], true, "etas[0]: ");
+        aie::print(etas[1], true, "etas[1]: ");
+        aie::print(phis[0], true, "phis[0]: ");
+        aie::print(phis[1], true, "phis[1]: ");
         #endif
 
         int16 max_dist_beam_int = 0;
@@ -73,13 +86,16 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
         printf("Min beam dist found on (%d, %d) = %f\n", idx_i_beam, idx_j_beam, min_dist_beam);
         printf("\n");
         #endif
+        
+        #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGDIST__)
+        printf("\t\tDEBUG DIST\n\n");
+        #endif
 
         for (int i0=0; i0<P_BUNCHES; i0++)
         {
             for (int j0=0; j0<V_SIZE; j0++)
             {
                 if (!pts[i0][j0]) continue;
-                if (is_jet[i0].test(j0)) continue;
 
                 min_dist = 1000;
 
@@ -100,7 +116,6 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
 
                     // once max {p_t1, p_tj} has been found, calculate the inverse and square it
                     aie::vector<float, V_SIZE> pt_pair_max_float = aie::to_float(pt_pair_max, 0);
-
                     aie::vector<float, V_SIZE> pt_factor = aie::inv(pt_pair_max_float); // pt_factor = 1 / pt_min
                     aie::accum<accfloat, V_SIZE> acc_float = aie::mul_square(pt_factor); // acc_float = (1 / pt_min) ^ 2
                     pt_factor = acc_float.to_vector<float>(0); // pt_factor = (1 / pt_min) ^ 2
@@ -158,7 +173,7 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
 
                     #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGDIST__)
                     printf("\t\tmin_dist_bunch = %f\n", min_dist_bunch);
-                    printf("\t\t--------------------\n");
+                    printf("\t\t--------------------\n\n");
                     #endif
 
                     if (min_dist_bunch < min_dist)
@@ -166,7 +181,15 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
                         min_dist = min_dist_bunch;
                         aie::mask<V_SIZE> min_idx_mask = aie::gt(dist, min_dist); // has ones where elements are gt the min distance found
                         min_idx_mask = ~min_idx_mask; // flip 0s and 1s in the mask
-                        int16 first_one_index = min_idx_mask.clz(); // find the index of the first 1 element of the mask
+                        int16 first_one_index = V_SIZE - min_idx_mask.clz() - 1; // find the index of the first 1 element of the mask
+
+                        #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGDIST__) && defined(__X86DEBUGDIST1__)
+                        aie::print(min_idx_mask, true, "\t\t\t\tmin_idx_mask ");
+                        printf("\t\t\t\t--------------------\n");
+                        printf("\t\t\t\tfirst_one_index = %d\n", first_one_index);
+                        printf("\t\t\t\t--------------------\n\n");
+                        #endif
+
                         idx_i0 = i0; 
                         idx_j0 = j0;
                         idx_i1 = i1;
@@ -183,80 +206,173 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
 
         if (min_dist_beam < min_dist)
         {
-            is_jet[idx_i_beam].set(idx_j_beam);
-            continue;
-        }
+            bool updated = false;
 
-        int32 pt_sum = 0;
-        int32 eta_wsum = 0, phi_wsum = 0; 
+            #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+            printf("\t\tDEBUG UPDATE\n\n");
+            #endif
 
-        for (int i1=0; i1<P_BUNCHES; i1++)
+            for (int i1=0; i1<P_BUNCHES; i1++)
+            {
+
+                // find the mask that spots the location of the pseudo-jet close to the beam, if there's any
+                aie::mask<V_SIZE> match_pt = aie::eq(pts[i1], pts[idx_i_beam][idx_j_beam]);
+                aie::mask<V_SIZE> match_eta = aie::eq(etas[i1], etas[idx_i_beam][idx_j_beam]);
+                aie::mask<V_SIZE> match_phi = aie::eq(phis[i1], phis[idx_i_beam][idx_j_beam]);
+                aie::mask<V_SIZE> match_mask = match_pt & match_eta & match_phi;
+                bool updated_cur = updated ? false : !match_mask.empty();
+                updated = updated_cur;
+                aie::mask<V_SIZE> updated_mask(updated);
+                match_mask &= updated_mask;
+
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+                aie::print(match_mask, true, "\t\tmatch_mask bunch ");
+                printf("\t\t--------------------\n");
+                #endif
+
+                // once selected, extract its pt, eta and phi
+                aie::vector<int16, V_SIZE> pt_selected_vec = aie::select(zeros_vector, pts[i1], match_mask);
+                aie::vector<int16, V_SIZE> eta_selected_vec = aie::select(zeros_vector, etas[i1], match_mask);
+                aie::vector<int16, V_SIZE> phi_selected_vec = aie::select(zeros_vector, phis[i1], match_mask);
+                int16 pt_selected = aie::reduce_add(pt_selected_vec);
+                int16 eta_selected = aie::reduce_add(eta_selected_vec);
+                int16 phi_selected = aie::reduce_add(phi_selected_vec);
+
+                aie::mask<N_JETS> updated_mask_shift(updated);
+                aie::mask<N_JETS> jets_mask_cur = jets_mask & updated_mask_shift;
+
+                // mark the pseudo-jet as jet by inserting the selected pt, eta and phi inside the jets vectors
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+                aie::print(jets_mask, true, "\t\tjets_mask ");
+                aie::print(jets_mask_cur, true, "\t\tjets_mask_cur ");
+                printf("\t\t--------------------\n");
+                #endif
+
+                pts_jets = aie::select(pts_jets, pt_selected, jets_mask);
+                etas_jets = aie::select(pts_jets, eta_selected, jets_mask);
+                phis_jets = aie::select(pts_jets, phi_selected, jets_mask);
+
+                // set to zero the pseudo-jet in the pts, etas, phis vectors
+                pts[i1] = aie::select(pts[i1], zeros_vector, match_mask);
+                etas[i1] = aie::select(etas[i1], zeros_vector, match_mask);
+                phis[i1] = aie::select(phis[i1], zeros_vector, match_mask);
+
+                // shift right jets_mask in order to insert a new jet in the following entry next time it occurs
+                jets_mask = jets_mask >> 1;
+
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+                aie::print(jets_mask, true, "\t\tjets_mask after (potential) shift bunch ");
+                printf("\t\t--------------------\n");
+                #endif
+            }
+        } else
         {
-            aie::mask<V_SIZE> match_pt = aie::eq(pts[i1], pts[idx_i0][idx_j0]);
-            aie::mask<V_SIZE> match_eta = aie::eq(etas[i1], etas[idx_i0][idx_j0]);
-            aie::mask<V_SIZE> match_phi = aie::eq(phis[i1], phis[idx_i0][idx_j0]);
-            aie::mask<V_SIZE> match_mask0 = match_pt & match_eta & match_phi;
+            int32 pt_sum = 0;
+            int32 eta_wsum = 0, phi_wsum = 0; 
 
-            #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
-            aie::print(match_mask0, true, "\t\tmatch_mask0 bunch ");
-            printf("\t\t--------------------\n");
-            #endif
+            for (int i1=0; i1<P_BUNCHES; i1++)
+            {
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+                printf("\t\tDEBUG RECOMBINATION - 1\n");
+                #endif
 
-            match_pt = aie::eq(pts[i1], pts[idx_i1][idx_j1]);
-            match_eta= aie::eq(etas[i1], etas[idx_i1][idx_j1]);
-            match_phi = aie::eq(phis[i1], phis[idx_i1][idx_j1]);
-            aie::mask<V_SIZE> match_mask1 = match_pt & match_eta & match_phi;
+                aie::mask<V_SIZE> match_pt = aie::eq(pts[i1], pts[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_eta = aie::eq(etas[i1], etas[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_phi = aie::eq(phis[i1], phis[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_mask0 = match_pt & match_eta & match_phi;
 
-            #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
-            aie::print(match_mask1, true, "\t\tmatch_mask1 bunch ");
-            printf("\t\t--------------------\n");
-            #endif
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
+                aie::print(match_mask0, true, "\t\tmatch_mask0 bunch ");
+                printf("\t\t--------------------\n");
+                #endif
 
-            aie::mask<V_SIZE> match_mask_tot = match_mask0 | match_mask1;
+                match_pt = aie::eq(pts[i1], pts[idx_i1][idx_j1]);
+                match_eta = aie::eq(etas[i1], etas[idx_i1][idx_j1]);
+                match_phi = aie::eq(phis[i1], phis[idx_i1][idx_j1]);
+                aie::mask<V_SIZE> match_mask1 = match_pt & match_eta & match_phi;
 
-            #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
-            aie::print(match_mask_tot, true, "\t\tmatch_mask_tot bunch ");
-            printf("\t\t--------------------\n\n");
-            #endif
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
+                aie::print(match_mask1, true, "\t\tmatch_mask1 bunch ");
+                printf("\t\t--------------------\n");
+                #endif
 
-            aie::vector<int16, V_SIZE> pts_to_sum = aie::select(zeros_vector, pts[i1], match_mask_tot);
-            pt_sum += aie::reduce_add(pts_to_sum);
+                aie::mask<V_SIZE> match_mask_tot = match_mask0 | match_mask1;
 
-            aie::vector<int16, V_SIZE> etas_to_sum = aie::select(zeros_vector, etas[i1], match_mask_tot);
-            aie::accum<acc48, V_SIZE> acc = aie::mul(etas_to_sum, pts_to_sum);
-            aie::vector<int32, V_SIZE> eta_pt_prod = acc.to_vector<int32>(0);
-            eta_wsum += aie::reduce_add(eta_pt_prod);
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
+                aie::print(match_mask_tot, true, "\t\tmatch_mask_tot bunch ");
+                printf("\t\t--------------------\n\n");
+                #endif
 
-            aie::vector<int16, V_SIZE> phis_to_sum = aie::select(zeros_vector, phis[i1], match_mask_tot);
-            acc = aie::mul(phis_to_sum, pts_to_sum);
-            aie::vector<int32, V_SIZE> phi_pt_prod = acc.to_vector<int32>(0);
-            phi_wsum += aie::reduce_add(phi_pt_prod);
+                aie::vector<int16, V_SIZE> pts_to_sum = aie::select(zeros_vector, pts[i1], match_mask_tot);
+                pt_sum += aie::reduce_add(pts_to_sum);
+
+                aie::vector<int16, V_SIZE> etas_to_sum = aie::select(zeros_vector, etas[i1], match_mask_tot);
+                aie::accum<acc48, V_SIZE> acc = aie::mul(etas_to_sum, pts_to_sum);
+                aie::vector<int32, V_SIZE> eta_pt_prod = acc.to_vector<int32>(0);
+                eta_wsum += aie::reduce_add(eta_pt_prod);
+
+                aie::vector<int16, V_SIZE> phis_to_sum = aie::select(zeros_vector, phis[i1], match_mask_tot);
+                acc = aie::mul(phis_to_sum, pts_to_sum);
+                aie::vector<int32, V_SIZE> phi_pt_prod = acc.to_vector<int32>(0);
+                phi_wsum += aie::reduce_add(phi_pt_prod);
+            }
+
+            float pt_sum_float = aie::to_float(pt_sum, 0);
+            float invpt_sum_float = aie::inv(pt_sum_float);
+
+            float eta_wsum_float = aie::to_float(eta_wsum, 0);
+            float eta_updated_float = eta_wsum_float * invpt_sum_float;
+            int32 eta_updated = aie::to_fixed(eta_updated_float, 0);
+
+            float phi_wsum_float = aie::to_float(phi_wsum, 0);
+            float phi_updated_float = phi_wsum_float * invpt_sum_float;
+            int32 phi_updated = aie::to_fixed(phi_updated_float, 0);
+
+            bool recomb0 = false, recomb1 = false;
+
+            for (int i1=0; i1<P_BUNCHES; i1++)
+            {
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGUPDATE__)
+                printf("\t\tDEBUG RECOMBINATION - 2\n");
+                #endif
+
+                aie::mask<V_SIZE> match_pt = aie::eq(pts[i1], pts[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_eta = aie::eq(etas[i1], etas[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_phi = aie::eq(phis[i1], phis[idx_i0][idx_j0]);
+                aie::mask<V_SIZE> match_mask0 = match_pt & match_eta & match_phi;
+                bool recomb0_cur = recomb0 ? false : !match_mask0.empty();
+                recomb0 = recomb0_cur;
+                aie::mask<V_SIZE> recomb0_mask(recomb0);
+                match_mask0 &= recomb0_mask;
+
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
+                aie::print(match_mask0, true, "\t\tmatch_mask0 bunch ");
+                printf("\t\t--------------------\n");
+                #endif
+
+                match_pt = aie::eq(pts[i1], pts[idx_i1][idx_j1]);
+                match_eta = aie::eq(etas[i1], etas[idx_i1][idx_j1]);
+                match_phi = aie::eq(phis[i1], phis[idx_i1][idx_j1]);
+                aie::mask<V_SIZE> match_mask1 = match_pt & match_eta & match_phi;
+                bool recomb1_cur = recomb1 ? false : !match_mask1.empty();
+                recomb1 = recomb1_cur;
+                aie::mask<V_SIZE> recomb1_mask(recomb1);
+                match_mask1 &= recomb1_mask;
+
+                #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
+                aie::print(match_mask1, true, "\t\tmatch_mask1 bunch ");
+                printf("\t\t--------------------\n\n");
+                #endif
+
+                pts[i1] = aie::select(pts[i1], (int16) pt_sum, match_mask0);
+                etas[i1] = aie::select(etas[i1], (int16) eta_updated, match_mask0);
+                phis[i1] = aie::select(phis[i1], (int16) phi_updated, match_mask0);
+
+                pts[i1] = aie::select(pts[i1], zeros_vector, match_mask1);
+                etas[i1] = aie::select(etas[i1], zeros_vector, match_mask1);
+                phis[i1] = aie::select(phis[i1], zeros_vector, match_mask1);
+            }
         }
-
-        pts[idx_i0][idx_j0] = pt_sum;
-        float pt_sum_float = aie::to_float(pt_sum, 0);
-        float invpt_sum_float = aie::inv(pt_sum_float);
-
-        float eta_wsum_float = aie::to_float(eta_wsum, 0);
-        float eta_updated_float = eta_wsum_float * invpt_sum_float;
-        int32 eta_updated = aie::to_fixed(eta_updated_float, 0);
-        etas[idx_i0][idx_j0] = static_cast<int16>(eta_updated);
-
-        float phi_wsum_float = aie::to_float(phi_wsum, 0);
-        float phi_updated_float = phi_wsum_float * invpt_sum_float;
-        int32 phi_updated = aie::to_fixed(phi_updated_float, 0);
-        phis[idx_i0][idx_j0] = static_cast<int16>(phi_updated);
-
-        #if defined(__X86SIM__) && defined(__X86DEBUG__) && defined(__X86DEBUGRECOMB__)
-        printf("pt (%d, %d) updated = %d\n", idx_i0, idx_j0, pt_sum);
-        printf("eta (%d, %d) updated = %d (%f)\n", idx_i0, idx_j0, etas[idx_i0][idx_j0], eta_updated_float);
-        printf("phi (%d, %d) updated = %d (%f)\n", idx_i0, idx_j0, phis[idx_i0][idx_j0], phi_updated_float);
-        printf("\n\n");
-        #endif
-
-        pts[idx_i1][idx_j1] = 0;
-        etas[idx_i1][idx_j1] = 0;
-        phis[idx_i1][idx_j1] = 0;
     }
 
     #if defined(__X86SIM__) && defined(__X86DEBUG__)
