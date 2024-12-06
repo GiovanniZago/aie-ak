@@ -18,6 +18,7 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
     const aie::vector<int16, V_SIZE> mtwopi_vector = aie::broadcast<int16, V_SIZE>(MTWOPI);
 
     // algorithm variables
+    int16 iter_idx = 0;
     float min_dist = 1000;
     float min_dist_bunch = 0;
     float min_dist_beam = 1000;
@@ -40,17 +41,21 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
     // count number of particles
     aie::mask<V_SIZE> is_particle_mask[P_BUNCHES];
     int16 num_particles = 0;
+    int16 test_counter = 1;
 
     is_particle_mask[0] = aie::neq(pts[0], (int16) 0);
     is_particle_mask[1] = aie::neq(pts[1], (int16) 0);
     num_particles = is_particle_mask[0].count() + is_particle_mask[1].count();
 
     // Algorithm implementation
-    for (int i_ep=0; i_ep<N_EPOCH; i_ep++)
+    while (test_counter > 0)
     {
+        iter_idx++;
+        test_counter--;
+
         #if defined(__X86SIM__) && defined(__X86DEBUG__)
         printf("*************************************************************************************************\n");
-        printf("Iteration # %d\n\n", i_ep);
+        printf("Iteration # %d\n\n", iter_idx);
         #endif
 
         if (!num_particles) continue;
@@ -103,7 +108,7 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
         #endif
 
         min_dist = 1000;
-        
+
         for (int i0=0; i0<P_BUNCHES; i0++)
         {
             for (int j0=0; j0<V_SIZE; j0++)

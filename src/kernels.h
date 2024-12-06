@@ -17,7 +17,6 @@
 #define V_SIZE 32
 #define P_BUNCHES 2
 #define N_JETS 32
-#define N_EPOCH 40
 
 static const int16 PI = 720;
 static const int16 MPI = -720;
