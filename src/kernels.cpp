@@ -33,10 +33,16 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
     // read input data
     pts[0] = readincr_v<V_SIZE>(in);
     pts[1] = readincr_v<V_SIZE>(in);
+    pts[2] = readincr_v<V_SIZE>(in);
+    pts[3] = readincr_v<V_SIZE>(in);
     etas[0] = readincr_v<V_SIZE>(in);
     etas[1] = readincr_v<V_SIZE>(in);
+    etas[2] = readincr_v<V_SIZE>(in);
+    etas[3] = readincr_v<V_SIZE>(in);
     phis[0] = readincr_v<V_SIZE>(in);
     phis[1] = readincr_v<V_SIZE>(in);
+    phis[2] = readincr_v<V_SIZE>(in);
+    phis[3] = readincr_v<V_SIZE>(in);
 
     // count number of particles
     aie::mask<V_SIZE> is_particle_mask[P_BUNCHES];
@@ -45,13 +51,15 @@ void antiKt(input_stream<int16> * __restrict in, output_stream<int16> * __restri
 
     is_particle_mask[0] = aie::neq(pts[0], (int16) 0);
     is_particle_mask[1] = aie::neq(pts[1], (int16) 0);
-    num_particles = is_particle_mask[0].count() + is_particle_mask[1].count();
+    is_particle_mask[2] = aie::neq(pts[2], (int16) 0);
+    is_particle_mask[3] = aie::neq(pts[3], (int16) 0);
+    num_particles = is_particle_mask[0].count() + is_particle_mask[1].count() + is_particle_mask[2].count() + is_particle_mask[3].count();
 
     // Algorithm implementation
-    while (test_counter > 0)
+    while (num_particles > 0)
     {
         iter_idx++;
-        test_counter--;
+        // test_counter--;
 
         #if defined(__X86SIM__) && defined(__X86DEBUG__)
         printf("*************************************************************************************************\n");

@@ -1,8 +1,8 @@
 #ifndef FUNCTION_KERNELS_H
 #define FUNCTION_KERNELS_H
 
-#define __X86DEBUG__
-#define __X86DEBUGDATA__
+// #define __X86DEBUG__
+// #define __X86DEBUGDATA__
 // #define __X86DEBUGDISTBEAM__
 // #define __X86DEBUGDIST__
 // #define __X86DEBUGDIST1__
@@ -13,9 +13,8 @@
 #include "aie_api/aie_adf.hpp"
 #include "adf.h"
 
-#define EV_SIZE 64
 #define V_SIZE 32
-#define P_BUNCHES 2
+#define P_BUNCHES 4
 #define N_JETS 32
 
 static const int16 PI = 720;
