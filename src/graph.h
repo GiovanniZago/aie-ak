@@ -14,8 +14,8 @@ class AntiKtGraph : public graph {
         AntiKtGraph() {
             antiKt_k = kernel::create(antiKt);
 
-            in = input_plio::create(plio_128_bits, "data/event_data_TTbar.csv", 360);
-            out = output_plio::create(plio_32_bits, "data/event_out_TTbar.csv", 360);
+            in = input_plio::create(plio_128_bits, "data/event_data_TTbar_float_128_4_new.csv", 360);
+            out = output_plio::create(plio_32_bits, "data/event_out_TTbar_float.csv", 360);
 
             // PL inputs
             connect<stream>(in.out[0], antiKt_k.in[0]);
